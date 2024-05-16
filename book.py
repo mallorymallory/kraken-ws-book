@@ -24,10 +24,10 @@ def connect(pairs, Depth):
     return ws
 
         
-def disconnect(ws):    
+def disconnect(ws, pairs, depth):    
     ws.close()    
-    ws = connect()
-    return ws, []
+    ws = connect(pairs, depth)
+    return ws
      
 
 def checkSum(message, a, b, pair):
@@ -106,7 +106,6 @@ def subscribe(assetPairs, dataQueue, requestFlag, proID, Depth=10, LogIt=True):
     dataQueue messages:
     book:
     [unix timestamp, book]
-        *on init of book data structure
         *on request
     status:
     [unix timestamp, "status", process ID, <True or 'kill'>]
@@ -129,9 +128,9 @@ def subscribe(assetPairs, dataQueue, requestFlag, proID, Depth=10, LogIt=True):
 
     ws = connect(pairs, Depth)
     ws.settimeout(0.1)
-    dataQueue.put([0, book])
 
     sub = 0
+    xxxx = 0
     while True:
         try:
             stst = time.time()
@@ -139,7 +138,8 @@ def subscribe(assetPairs, dataQueue, requestFlag, proID, Depth=10, LogIt=True):
             if check == 2:
                 raise Exception ('thread killed from handlr')
             elif check == 1:
-                dataQueue.put([stst, book])
+                xxxx+=1
+                dataQueue.put([stst, book, xxxx])
                 requestFlag.value = 0
             message = ws.recv()
             message = json.loads(message)   
@@ -235,7 +235,11 @@ def subscribe(assetPairs, dataQueue, requestFlag, proID, Depth=10, LogIt=True):
                 else:
                     if LogIt:
                         logit([stst, proID, 'Book WS Issue:' + str(F) + ' retrying', traceback.format_exc(), message])
-                    ws, setup,  = disconnect(ws)
+                    ws = disconnect(ws, pairs, Depth)
+                    ws.settimeout(0.1)
+                    setup = []
+                    sub = 0
+
             elif str(F) in ['The read operation timed out']:
                 pass
             else:
@@ -245,18 +249,3 @@ def subscribe(assetPairs, dataQueue, requestFlag, proID, Depth=10, LogIt=True):
                 dataQueue.put([stst, 'status', proID, 'kill'])
                 break
     return
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

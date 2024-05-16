@@ -6,7 +6,16 @@ import pairs
 import csv
 import traceback
 
-def getProcesses():
+if __name__ == '__main__':
+    xt = 0           
+    st = time.time()
+
+    Status = [None]
+    booksetup = []
+    full = {}
+    flag = False
+    var = 0
+
     commObjs = []
     for Group in range(len(pairs.assets)):        
         Flag = multiprocessing.Value('i', 0)
@@ -14,69 +23,84 @@ def getProcesses():
         commObjs.append([Flag, Reciever])
         booksetup.append(None)
         b = multiprocessing.Process(target=book.subscribe, 
-                                    args=(pairs.assets[Group], Reciever, Flag, Group, 100))
+                                    args=(pairs.assets[Group], Reciever, Flag, Group, 500))
         b.daemon = True
         b.start()
-    return  commObjs
+
+    while Status[0] == None:   ## wait for all status updates to be received before polling data
+        for q in commObjs:
+            try:
+                status = q[1].get(False)
+                if status[1] == 'status':
+                    booksetup[status[2]] = status[3]
+                    if status[3] == 'kill':
+                        raise Exception('MAIN: kill signal recved during startup')
+                else:
+                    raise Exception('MAIN: unexpected respnse received during startup')
+            except queue.Empty:
+                pass
+
+        if booksetup.count(True) == len(booksetup):        
+            print('all status go')
+            Status[0] = True
+            break
+        time.sleep(0.1)
 
 
-if __name__ == '__main__':
-    xt = 0           
-    st = time.time()
-    
-    Status = [None]
-    booksetup = []
-    full = {}
-    flag = False
-    var = 0
+    while xt-st < 7200:  ## run for x time
 
-    commObjs = getProcesses()
-        
-    while xt-st < 300:  ## run for x time
         try:
+
             xt = time.time()
+            if int(xt-st) % 60 == 0:
+                print(int(int(xt-st)/60), ':)', full['XBT']['USD']['bids'][0], '>', full['XBT']['USD']['asks'][0])
 
 
             # set requestFlag for each process and get data
-            # verify times not out of whack 
-            # could probably do this in a pool or smth
+            # verify booktime v maintime not out of whack 
+            
+            ff = time.perf_counter()    
+            ## if flag was set true last round > get data, else: nothing
+            for i in commObjs:
+                try:
+                    A = i[1].get(flag, 5 if flag else None)
+                    
+                    if A[1] == 'status':
+                        if A[3] == 'kill':
+                            raise Exception('feed died')
+                    else:
+                        full.update(A[1])
+                        #if A[2] != var:
+                        if (xt-A[0] > 1 and xt-st > 15) or A[2] != var: # timer check and refid check
+                            print(xt, A[0],)
+                            print(xt-A[0],commObjs.index(i), A[2], var) ### timer warning
+                except queue.Empty:
+                    if flag:
+                        raise Exception('timed out on message '+str(var)+' from thread '+str(commObjs.index(i)))
+                    else:
+                        pass
+            ff2 = time.perf_counter()
+            #print(ff2-ff)
+            if ff2-ff > 0.5:
+                print('concerning..')
+            
+            ##Set flag before sleep to reduce wait during .get above
+            
             if flag:
                 flag = False
             else:
                 flag = True
                 var+=1
-            for i in commObjs:
-                try:
-                    if Status[0]:
-                        if flag:
-                            i[0].value = 1
-
-                    A = i[1].get(False)
-                    if A[1] == 'status':
-                        booksetup[A[2]] = A[3]
-                    else:
-                        full.update(A[1])
-                        if xt-A[0] > 1 and xt-st > 15:
-                            print(xt-A[0],commObjs.index(i), var)
-                except queue.Empty:
-                    pass
-            
-            # review status of processes
-            # if one dies, kill all and exit
-            
-            if booksetup.count(True) == len(pairs.assets):
-                if Status[0] == None:
-                    print('all status go')
-                    Status[0] = True
-            else:
-                if Status[0] == True:
-                    raise Exception('feed dead')
-                elif booksetup.count('kill') > 0:
-                    raise Exception('feed dead')
+                for i in commObjs:
+                    i[0].value = 1
                 
-            time.sleep(0.1)
+            time.sleep(0.2)
+            
             
         except Exception as F:
+            if str(F) == 'list index out of range':
+                print(full['XBT']['USD'])
+            print(F)
             if str(F) in ['feed dead', 'killed from main']:
                 with open('actionlog.csv', 'a', newline='') as err:
                     eeee = csv.writer(err)
